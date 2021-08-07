@@ -29,7 +29,7 @@ def regulate_string(s):
 
 
 match_regex_dict = {}
-chinese_re = re.compile(r'[^\x00-\xff]')
+chinese_re = re.compile(r'[^\x00-\x2f,\x3a-\xff]')
 
 
 def match_string(a, b):
@@ -41,6 +41,7 @@ def match_string(a, b):
     else:
         short_ch = chinese_re.findall(short)
         pattern = r"\S*".join(short_ch)
+        # print(pattern)
         regex = re.compile(pattern)
         match_regex_dict[short] = regex
     if regex.search(long):
@@ -433,6 +434,7 @@ def extract_rows_from_zjh_easy(zjh_filename):
 
 
 if __name__ == "__main__":
+
     t0 = time.time()
     result_xls = 'result.xls'
     easy_db, normal_db = load_db(result_xls)
@@ -444,3 +446,4 @@ if __name__ == "__main__":
     t1 = time.time()
     print("all process elapsed: {}".format(t1-t0))
 
+    # match_string("华宝中证1000指数证券投资基金", "华宝中证金融科技主题交易型开放式指数证券投资基金发起式联接基金")
