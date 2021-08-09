@@ -167,7 +167,6 @@ def format_date_value(v):
         return "%d-%02d-%02d" % (int(dt[0]), int(dt[1]), int(dt[2]))
     raise Exception("unexpected type: {}".format(type(v)))
 
-
 def format_easy_row(easy_row):
     for i in range(3, 10):
         easy_row[i] = format_date_value(easy_row[i])
