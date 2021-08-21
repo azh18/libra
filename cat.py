@@ -164,6 +164,8 @@ def format_date_value(v):
     if isinstance(v, str):
         dt = v.strip('）').strip(')').strip('受理').strip('（').strip('(')
         dt = dt.split('-')
+        if len(dt) != 3:
+            return v
         return "%d-%02d-%02d" % (int(dt[0]), int(dt[1]), int(dt[2]))
     raise Exception("unexpected type: {}".format(type(v)))
 
