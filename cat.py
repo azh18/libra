@@ -64,7 +64,7 @@ def match_string(a, b):
 
 # 拉取万德数据
 # ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
-# 'Wind一级分类', 'Wind二级分类')
+# 'Wind一级分类', 'Wind二级分类', '基金代码')
 def load_wd_data(wd_file):
     wd_rows = []
     sheet = xlrd.open_workbook(wd_file).sheets()[0]
@@ -72,17 +72,20 @@ def load_wd_data(wd_file):
         row = sheet.row_values(i)
         if not isinstance(row[0], str) or len(row[0]) < 7 or not row[0][:6].isdigit():
             continue
-        wd_row = ['' for j in range(10)]
+        wd_row = ['' for _ in range(11)]
         wd_row[0] = row[2]
         wd_row[1] = row[3]
         wd_row[2] = row[14]
-        wd_row[3:5] = row[5:7]
+        # 万德的时间已经是yyyy-mm-dd的格式，因此无需再处理
+        wd_row[3] = row[5]
+        wd_row[4] = row[6]
         wd_row[5] = row[7]
         if wd_row[5] > row[8]:
             wd_row[5] = row[8]
         wd_row[6] = row[9]
         wd_row[7] = row[10]
         wd_row[8:10] = row[12:14]
+        wd_row[10] = row[0]
         for j in range(len(wd_row)):
             if isinstance(wd_row[j], str):
                 wd_row[j] = wd_row[j].strip()
@@ -90,8 +93,11 @@ def load_wd_data(wd_file):
     return wd_rows
 
 
-def find_wd_row(wd_rows, guanli, tuoguan, quancheng):
+def find_wd_row(wd_rows, guanli, tuoguan, quancheng, is_change, apply_date):
     for wd_row in wd_rows:
+        if not is_change and len(wd_row[3]) > 6 and apply_date > wd_row[3]:
+            # 如果不是变更注册，则跳过申请日晚于发行日的情况（匹配正确的话，申请日不可能晚于发行日）
+            continue
         if match_string(guanli, wd_row[0]) and match_string(tuoguan, wd_row[1]) and match_string(quancheng, wd_row[2]):
             return wd_row
     return None
@@ -163,11 +169,15 @@ def format_date_value(v):
         return "%d-%02d-%02d" % (dt[0], dt[1], dt[2])
     if isinstance(v, str):
         dt = v.strip('）').strip(')').strip('受理').strip('（').strip('(')
-        dt = dt.split('-')
+        delim = "-"
+        if "/" in v:
+            delim = "/"
+        dt = dt.split(delim)
         if len(dt) != 3:
             return v
         return "%d-%02d-%02d" % (int(dt[0]), int(dt[1]), int(dt[2]))
     raise Exception("unexpected type: {}".format(type(v)))
+
 
 def format_easy_row(easy_row):
     for i in range(3, 10):
@@ -178,6 +188,8 @@ def format_easy_row(easy_row):
 # 填充 一级分类
 def classify_easy_row_c1(easy_row):
     full_name = easy_row[2].lower()
+    wd_c2_class = easy_row[12]
+
     if "etf" in full_name:
         return "指数型"
     if "指数" in full_name:
@@ -192,7 +204,7 @@ def classify_easy_row_c1(easy_row):
         return "混合型"
     if "债券" in full_name:
         return "债券型"
-    if "商品" in full_name:
+    if "商品" in wd_c2_class:
         return "商品型"
     if "股票" in full_name:
         return "股票型"
@@ -201,10 +213,34 @@ def classify_easy_row_c1(easy_row):
 
 def classify_easy_row_c2(easy_row):
     full_name = easy_row[2].lower()
-    if "交易型" in full_name and "开放式" in full_name and "指数" in full_name:
+    c1_class = easy_row[13]
+    if c1_class == "指数型":
         if "联接" in full_name:
             return "ETF联接"
-        return "ETF"
+        if "债" in full_name:
+            return "债券指数型"
+        if "交易型" in full_name:
+            return "股票ETF"
+        if "增强" in full_name:
+            return "指数增强型"
+        return "股票指数型"
+    if c1_class == "债券型":
+        for item in ("纯债", "可转债", "金融债", "利率债", "短债", "信用债"):
+            if item in full_name:
+                return "主题债券型"
+        return "普通债券型"
+    if c1_class == "FOF":
+        if "目标日期" in full_name:
+            return "目标日期FOF型"
+        if "lof" in full_name:
+            return "FOF-LOF型"
+        return "目标风险FOF型"
+    if c1_class == "MOM":
+        if "混合" in full_name:
+            return "混合型MOM"
+        return ""
+    if c1_class == "REITs":
+        return "基础设施型"
     return ""
 
 
@@ -230,10 +266,11 @@ def autofill_easy_row(easy_row):
 # 使用万德数据填充： wd_data: ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
 # 'Wind一级分类', 'Wind二级分类')
 def fulfill_row_with_wd_data_easy(easy_row, wd_data):
-    wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[2])
-    if wd_row is None and easy_row[19]:
+    is_change = easy_row[19] == "是"
+    wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[2], is_change, easy_row[3])
+    if wd_row is None and is_change:
         # try use old name
-        wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[19])
+        wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[19], is_change, easy_row[3])
     if wd_row is None:
         # no wd data
         return easy_row
@@ -337,48 +374,50 @@ def fulfill_db_with_zjh_easy(db, zjh_rows, wd_data):
 
 
 # 简易程序: zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
-def extract_row_from_zjh_easy_add(zjh_row):
+def extract_row_from_zjh_easy_add(zjh_xls_row):
     row = ['' for _ in range(8)]
-    row[0:4] = zjh_row[1:5]
-    row[4] = format_date_value(zjh_row[7])
-    row[5] = zjh_row[13]
+    row[0:3] = zjh_xls_row[1:4]
+    row[3] = format_date_value(zjh_xls_row[4])
+    row[4] = format_date_value(zjh_xls_row[7])
+    row[5] = format_date_value(zjh_xls_row[13])
     row[6] = '否'
     return row
 
 
 # 变更注册（简易）: zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
-def extract_row_from_zjh_easy_change(zjh_row):
+def extract_row_from_zjh_easy_change(zjh_xls_row):
     row = ['' for _ in range(8)]
-    row[0:2] = zjh_row[1:3]
-    row[2] = zjh_row[4]
-    row[3] = zjh_row[5]
-    row[4] = format_date_value(zjh_row[8])
-    row[5] = zjh_row[14]
+    row[0:2] = zjh_xls_row[1:3]
+    row[2] = zjh_xls_row[4]
+    row[3] = format_date_value(zjh_xls_row[5])
+    row[4] = format_date_value(zjh_xls_row[8])
+    row[5] = format_date_value(zjh_xls_row[14])
     row[6] = '是'
-    row[7] = zjh_row[3]
+    row[7] = zjh_xls_row[3]
     return row
 
 
 # 普通程序：zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
-def extract_row_from_zjh_normal_add(zjh_row):
+def extract_row_from_zjh_normal_add(zjh_xls_row):
     row = ['' for _ in range(8)]
-    row[0:4] = zjh_row[1:5]
-    row[4] = format_date_value(zjh_row[7])
-    row[5] = zjh_row[13]
+    row[0:3] = zjh_xls_row[1:4]
+    row[3] = format_date_value(zjh_xls_row[4])
+    row[4] = format_date_value(zjh_xls_row[7])
+    row[5] = format_date_value(zjh_xls_row[13])
     row[6] = '否'
     return row
 
 
 # 变更注册（普通）：zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
-def extract_row_from_zjh_normal_change(zjh_row):
+def extract_row_from_zjh_normal_change(zjh_xls_row):
     row = ['' for _ in range(8)]
-    row[0:2] = zjh_row[1:3]
-    row[2] = zjh_row[4]
-    row[3] = zjh_row[5]
-    row[4] = format_date_value(zjh_row[8])
-    row[5] = zjh_row[14]
+    row[0:2] = zjh_xls_row[1:3]
+    row[2] = zjh_xls_row[4]
+    row[3] = format_date_value(zjh_xls_row[5])
+    row[4] = format_date_value(zjh_xls_row[8])
+    row[5] = format_date_value(zjh_xls_row[14])
     row[6] = '是'
-    row[7] = zjh_row[3]
+    row[7] = zjh_xls_row[3]
     return row
 
 
@@ -387,20 +426,20 @@ def extract_rows_from_zjh_easy(zjh_filename):
     easy_rows = []
     easy_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[0]
     for i in range(easy_add_sheet.nrows):
-        zjh_row = easy_add_sheet.row_values(i)
-        if not isinstance(zjh_row[0], float):
+        zjh_xls_row = easy_add_sheet.row_values(i)
+        if not isinstance(zjh_xls_row[0], float):
             continue
-        easy_row = extract_row_from_zjh_easy_add(zjh_row)
+        easy_row = extract_row_from_zjh_easy_add(zjh_xls_row)
         for j in range(len(easy_row)):
             if isinstance(easy_row[j], str):
                 easy_row[j] = easy_row[j].strip()
         easy_rows.append(easy_row)
     easy_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[2]
     for i in range(easy_change_sheet.nrows):
-        zjh_row = easy_change_sheet.row_values(i)
-        if not isinstance(zjh_row[0], float):
+        zjh_xls_row = easy_change_sheet.row_values(i)
+        if not isinstance(zjh_xls_row[0], float):
             continue
-        easy_row = extract_row_from_zjh_easy_change(zjh_row)
+        easy_row = extract_row_from_zjh_easy_change(zjh_xls_row)
         for j in range(len(easy_row)):
             if isinstance(easy_row[j], str):
                 easy_row[j] = easy_row[j].strip()
@@ -410,11 +449,11 @@ def extract_rows_from_zjh_easy(zjh_filename):
     normal_rows = []
     normal_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[1]
     for i in range(normal_add_sheet.nrows):
-        zjh_row = normal_add_sheet.row_values(i)
-        if not isinstance(zjh_row[0], float):
+        zjh_xls_row = normal_add_sheet.row_values(i)
+        if not isinstance(zjh_xls_row[0], float):
             continue
-        print(zjh_row)
-        row = extract_row_from_zjh_normal_add(zjh_row)
+        print(zjh_xls_row)
+        row = extract_row_from_zjh_normal_add(zjh_xls_row)
         for j in range(len(row)):
             if isinstance(row[j], str):
                 row[j] = row[j].strip()
@@ -422,10 +461,10 @@ def extract_rows_from_zjh_easy(zjh_filename):
 
     normal_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[3]
     for i in range(normal_change_sheet.nrows):
-        zjh_row = normal_change_sheet.row_values(i)
-        if not isinstance(zjh_row[0], float):
+        zjh_xls_row = normal_change_sheet.row_values(i)
+        if not isinstance(zjh_xls_row[0], float):
             continue
-        row = extract_row_from_zjh_normal_change(zjh_row)
+        row = extract_row_from_zjh_normal_change(zjh_xls_row)
         for j in range(len(row)):
             if isinstance(row[j], str):
                 row[j] = row[j].strip()
@@ -434,7 +473,13 @@ def extract_rows_from_zjh_easy(zjh_filename):
     return easy_rows, normal_rows
 
 
+from zjh_data import download_zjh_xls
+
 if __name__ == "__main__":
+    wd_path = "wd.xlsx"
+    zjh_path = "zjh.xls"
+    # update zjh xls
+    download_zjh_xls(zjh_path)
 
     t0 = time.time()
     result_xls = 'result.xls'
@@ -445,6 +490,6 @@ if __name__ == "__main__":
     new_normal_db = fulfill_db_with_zjh_easy(normal_db, zjh_normal_rows, wd_data)
     store_db(new_easy_db, new_normal_db, result_xls)
     t1 = time.time()
-    print("all process elapsed: {}".format(t1-t0))
+    print("all process elapsed: {}".format(t1 - t0))
 
     # match_string("华宝中证1000指数证券投资基金", "华宝中证金融科技主题交易型开放式指数证券投资基金发起式联接基金")

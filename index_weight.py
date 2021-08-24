@@ -9,7 +9,7 @@ w.isconnected()
 
 # input: like 000300.SH
 def get_index_weight_data(index_code):
-    data = w.wset("indexconstituent","windcode=%s"%index_code)
+    data = w.wset("indexconstituent", "windcode=%s" % index_code)
     if data.ErrorCode != 0:
         raise Exception("error_code={}".format(data.ErrorCode))
     return data.Data
