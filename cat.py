@@ -67,6 +67,7 @@ def match_string(a, b):
 # 'Wind一级分类', 'Wind二级分类', '基金代码')
 def load_wd_data(wd_file):
     wd_rows = []
+    wd_dict = {}
     sheet = xlrd.open_workbook(wd_file).sheets()[0]
     for i in range(sheet.nrows):
         row = sheet.row_values(i)
@@ -75,7 +76,7 @@ def load_wd_data(wd_file):
         wd_row = ['' for _ in range(11)]
         wd_row[0] = row[2]
         wd_row[1] = row[3]
-        wd_row[2] = row[14]
+        wd_row[2] = row[14].strip().replace('（', '(').replace('）', ')')
         # 万德的时间已经是yyyy-mm-dd的格式，因此无需再处理
         wd_row[3] = row[5]
         wd_row[4] = row[6]
@@ -90,7 +91,8 @@ def load_wd_data(wd_file):
             if isinstance(wd_row[j], str):
                 wd_row[j] = wd_row[j].strip()
         wd_rows.append(wd_row)
-    return wd_rows
+        wd_dict[wd_row[2]] = wd_row
+    return wd_rows, wd_dict
 
 
 def find_wd_row(wd_rows, guanli, tuoguan, quancheng, is_change, apply_date):
@@ -100,6 +102,20 @@ def find_wd_row(wd_rows, guanli, tuoguan, quancheng, is_change, apply_date):
             continue
         if match_string(guanli, wd_row[0]) and match_string(tuoguan, wd_row[1]) and match_string(quancheng, wd_row[2]):
             return wd_row
+    return None
+
+
+# zjh_weekly_row: (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
+def find_zjh_weekly_row_by_zjh_full_row(zjh_weekly_rows, guanli, quancheng, shenqingri):
+    # todo: 优化：按时间做索引，避免遍历
+    for zjh_weekly_row in zjh_weekly_rows:
+        # 申请日
+        if zjh_weekly_row[3] != shenqingri:
+            continue
+        if match_string(guanli, zjh_weekly_row[0]) and match_string(quancheng, zjh_weekly_row[2]):
+            print('find_zjh_weekly_row_by_zjh_full_row: %s match (%s, %s, %s)' % (zjh_weekly_row, guanli, quancheng,
+                                                                                  shenqingri))
+            return zjh_weekly_row
     return None
 
 
@@ -140,6 +156,19 @@ def load_db(result_xls_path):
 easy_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
               '是否为变更注册', '若为变更注册，原申请事项名称/代码']
+
+
+# 仅非变更程序
+def store_db_v2(new_db, file):
+    f = xlwt.Workbook()
+    easy_sheet = f.add_sheet('非变更程序', cell_overwrite_ok=True)
+    print('非变更程序：%d' % len(new_db))
+    temp_rows = [easy_title] + new_db
+    for i, row in enumerate(temp_rows):
+        print('add %d' % i)
+        for j, item in enumerate(row):
+            easy_sheet.write(i, j, item)
+    f.save(file)
 
 
 def store_db(easy_db, normal_db, file):
@@ -265,12 +294,12 @@ def autofill_easy_row(easy_row):
 
 # 使用万德数据填充： wd_data: ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
 # 'Wind一级分类', 'Wind二级分类')
-def fulfill_row_with_wd_data_easy(easy_row, wd_data):
+def fulfill_row_with_wd_rows(easy_row, wd_rows):
     is_change = easy_row[19] == "是"
-    wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[2], is_change, easy_row[3])
+    wd_row = find_wd_row(wd_rows, easy_row[0], easy_row[1], easy_row[2], is_change, easy_row[3])
     if wd_row is None and is_change:
         # try use old name
-        wd_row = find_wd_row(wd_data, easy_row[0], easy_row[1], easy_row[19], is_change, easy_row[3])
+        wd_row = find_wd_row(wd_rows, easy_row[0], easy_row[1], easy_row[19], is_change, easy_row[3])
     if wd_row is None:
         # no wd data
         return easy_row
@@ -292,11 +321,78 @@ def fulfill_row_with_wd_data_easy(easy_row, wd_data):
     return easy_row
 
 
-def complete_row(idx, db_row, wd_data, zjh_row):
+# 使用万德数据填充： wd_data: ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
+# 'Wind一级分类', 'Wind二级分类')
+# return (found, fulfilled_row)
+def fulfill_row_with_wd_dict(easy_row, wd_dict):
+    quancheng = easy_row[2]
+    if quancheng not in wd_dict:
+        return False, None
+
+    wd_row = wd_dict[quancheng]
+    print('%s match %s' % (wd_row, easy_row))
+    easy_row[1] = wd_row[1]
+    if not easy_row[6]:
+        easy_row[6] = wd_row[3]
+    if not easy_row[7]:
+        easy_row[7] = wd_row[4]
+    if not easy_row[8]:
+        easy_row[8] = wd_row[5]
+    if not easy_row[9]:
+        easy_row[9] = wd_row[6]
+    if not easy_row[10]:
+        easy_row[10] = wd_row[7]
+    if not easy_row[11]:
+        easy_row[11] = wd_row[8]
+    if not easy_row[12]:
+        easy_row[12] = wd_row[9]
+    return True, easy_row
+
+
+# zjh_weekly_row: (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
+def fulfill_row_with_zjh_weekly_rows(easy_row, zjh_weekly_rows):
+    zjh_weekly_row = find_zjh_weekly_row_by_zjh_full_row(zjh_weekly_rows, easy_row[0], easy_row[2], easy_row[3])
+    if not zjh_weekly_row:
+        return easy_row
+    if not easy_row[1]:
+        easy_row[1] = zjh_weekly_row[1]
+    easy_row[5] = zjh_weekly_row[5]
+
+    easy_row[18] = zjh_weekly_row[6]
+    easy_row[19] = zjh_weekly_row[7]
+    return easy_row
+
+
+# db_row: ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
+#               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
+#               '是否为变更注册', '若为变更注册，原申请事项名称/代码']
+# zjh_full_row: # 0 接受材料日期（申请日）	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注
+def complete_row_with_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, zjh_weekly_rows):
+    st = time.time()
+    db_row[0] = zjh_full_row[1]
+    db_row[2] = zjh_full_row[2]
+    db_row[3] = zjh_full_row[0]
+    db_row[4] = zjh_full_row[3]
+    db_row[13:15] = zjh_full_row[5:7]
+    # todo: 备注还没有加上
+
+    found, fulfilled_db_row = fulfill_row_with_wd_dict(db_row, wd_dict)
+    if not found:
+        fulfilled_db_row = fulfill_row_with_zjh_weekly_rows(db_row, zjh_weekly_rows)
+
+    db_row = autofill_easy_row(fulfilled_db_row)
+    db_row = format_easy_row(db_row)
+    et = time.time()
+    print("process {} elapsed: {}".format(idx, et - st))
+    return db_row
+
+
+def complete_row_with_zjh_weekly_row(idx, db_row, wd_rows, zjh_row):
     t0 = time.time()
     db_row[0:6] = zjh_row[0:6]
     db_row[18:20] = zjh_row[6:8]
-    db_row = fulfill_row_with_wd_data_easy(db_row, wd_data)
+
+    db_row = fulfill_row_with_wd_rows(db_row, wd_rows)
     db_row = autofill_easy_row(db_row)
     db_row = format_easy_row(db_row)
     t1 = time.time()
@@ -309,74 +405,64 @@ print("CPU NUM=%d" % CPU_NUM)
 
 
 # 返回新的db
-def fulfill_db_with_zjh_easy(db, zjh_rows, wd_data):
-    zjh_dict = {}
+def fulfill_db_with_zjh_full(db, zjh_full_rows, wd_dict, zjh_weekly_rows):
+    zjh_full_dict = {}
     db_dict = {}
     for row in db:
         db_dict[row[2]] = row
-    for row in zjh_rows:
-        zjh_dict[row[2]] = row
+    for row in zjh_full_rows:
+        zjh_full_dict[row[2]] = row
 
-    n_tasks = len(db) + len(zjh_rows)
+    n_tasks = len(db) + len(zjh_full_rows)
     n_fin = 0
 
-    new_easy_db = []
+    # update db: if not in zjh_full_dict, remove them; else update them use data from zjh_weekly and wd_data
+    new_db = []
     pool = Pool(processes=CPU_NUM)
     with Manager() as ma:
-        #         row_list = ma.list([])
         v_list = []
         for db_row in db:
             n_fin += 1
             print('%d/%d' % (n_fin, n_tasks))
-            if db_row[2] not in zjh_dict:
+            if db_row[2] not in zjh_full_dict:
                 continue
-            zjh_row = zjh_dict[db_row[2]]
-            v = pool.apply_async(complete_row, args=(n_fin, db_row, wd_data, zjh_row))
+            zjh_full_row = zjh_full_dict[db_row[2]]
+            v = pool.apply_async(complete_row_with_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
+                                                                       zjh_weekly_rows))
             v_list.append(v)
-        #         db_row[0:6] = zjh_row[0:6]
-        #         db_row[18:20] = zjh_row[6:8]
-        #         db_row = fulfill_row_with_wd_data_easy(db_row, wd_data)
-        #         db_row = autofill_easy_row(db_row)
-        #         db_row = format_easy_row(db_row)
-        #             new_easy_db.append(db_row)
         pool.close()
         pool.join()
-        new_easy_db += [v.get() for v in v_list]
-    #         new_easy_db += row_list
-    print("len of db: %d" % len(new_easy_db))
+        new_db += [v.get() for v in v_list]
+    print("len of db: %d" % len(new_db))
 
+    # for those in zjh_full_rows but not in db: fill fields using zjh_weekly and wd_data, then add them to the db
     pool = Pool(processes=CPU_NUM)
     with Manager() as ma:
-        #         row_list = ma.list([])
         v_list = []
-        for zjh_row in zjh_rows:
+        for zjh_full_row in zjh_full_rows:
             n_fin += 1
             print('%d/%d' % (n_fin, n_tasks))
-            if zjh_row[2] in db_dict:
+            if zjh_full_row[2] in db_dict:
                 continue
             db_row = ['' for i in range(20)]
-            #             print("process")
-            #         db_row[0:6] = zjh_row[0:6]
-            #         db_row[18:20] = zjh_row[6:8]
-            #         db_row = fulfill_row_with_wd_data_easy(db_row, wd_data)
-            #         db_row = autofill_easy_row(db_row)
-            #         db_row = format_easy_row(db_row)
-            #         new_easy_db.append(db_row)
-            v = pool.apply_async(complete_row, args=(n_fin, db_row, wd_data, zjh_row))
+            v = pool.apply_async(complete_row_with_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
+                                                                       zjh_weekly_rows))
             v_list.append(v)
         pool.close()
         pool.join()
-        new_easy_db += [v.get() for v in v_list]
-    #         new_easy_db += row_list
-    print("len of db: %d" % len(new_easy_db))
-    new_easy_db = sorted(new_easy_db, key=lambda x: x[4], reverse=True)
-    return new_easy_db
+        new_db += [v.get() for v in v_list]
+    print("len of db: %d" % len(new_db))
+
+    new_db = sorted(new_db, key=lambda x: str(x[3])+str(x[4]), reverse=True)
+
+    return new_db
 
 
 # 简易程序: zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
 def extract_row_from_zjh_easy_add(zjh_xls_row):
     row = ['' for _ in range(8)]
     row[0:3] = zjh_xls_row[1:4]
+    row[2] = row[2].strip().replace('（', '(').replace('）', ')')
     row[3] = format_date_value(zjh_xls_row[4])
     row[4] = format_date_value(zjh_xls_row[7])
     row[5] = format_date_value(zjh_xls_row[13])
@@ -389,6 +475,7 @@ def extract_row_from_zjh_easy_change(zjh_xls_row):
     row = ['' for _ in range(8)]
     row[0:2] = zjh_xls_row[1:3]
     row[2] = zjh_xls_row[4]
+    row[2] = row[2].strip().replace('（', '(').replace('）', ')')
     row[3] = format_date_value(zjh_xls_row[5])
     row[4] = format_date_value(zjh_xls_row[8])
     row[5] = format_date_value(zjh_xls_row[14])
@@ -401,6 +488,7 @@ def extract_row_from_zjh_easy_change(zjh_xls_row):
 def extract_row_from_zjh_normal_add(zjh_xls_row):
     row = ['' for _ in range(8)]
     row[0:3] = zjh_xls_row[1:4]
+    row[2] = row[2].strip().replace('（', '(').replace('）', ')')
     row[3] = format_date_value(zjh_xls_row[4])
     row[4] = format_date_value(zjh_xls_row[7])
     row[5] = format_date_value(zjh_xls_row[13])
@@ -413,6 +501,7 @@ def extract_row_from_zjh_normal_change(zjh_xls_row):
     row = ['' for _ in range(8)]
     row[0:2] = zjh_xls_row[1:3]
     row[2] = zjh_xls_row[4]
+    row[2] = row[2].strip().replace('（', '(').replace('）', ')')
     row[3] = format_date_value(zjh_xls_row[5])
     row[4] = format_date_value(zjh_xls_row[8])
     row[5] = format_date_value(zjh_xls_row[14])
@@ -422,7 +511,7 @@ def extract_row_from_zjh_normal_change(zjh_xls_row):
 
 
 # zjh row -> data row
-def extract_rows_from_zjh_easy(zjh_filename):
+def extract_rows_from_zjh_weekly(zjh_filename):
     easy_rows = []
     easy_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[0]
     for i in range(easy_add_sheet.nrows):
@@ -473,22 +562,56 @@ def extract_rows_from_zjh_easy(zjh_filename):
     return easy_rows, normal_rows
 
 
+# 0 接受材料日期	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注
+def extract_rows_from_zjh_full(zjh_full_filename):
+    row_list = []
+    zjh_full_sheet = xlrd.open_workbook(zjh_full_filename).sheets()[0]
+    for i in range(1, zjh_full_sheet.nrows):
+        zjh_xls_row = zjh_full_sheet.row_values(i)
+        row = extract_row_from_zjh_full(zjh_xls_row)
+        for j in range(len(row)):
+            if isinstance(row[j], str):
+                row[j] = row[j].strip()
+        row_list.append(row)
+    return row_list
+
+
+# 0 接受材料日期	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注
+def extract_row_from_zjh_full(zjh_full_row):
+    row = ['' for _ in range(8)]
+    row[0:8] = zjh_full_row[0:8]
+    row[2] = row[2].strip().replace('（', '(').replace('）', ')')
+    row[3] = format_date_value(row[3])
+    return row
+
+
 from zjh_data import download_zjh_xls
 
 if __name__ == "__main__":
     wd_path = "wd.xlsx"
-    zjh_path = "zjh.xls"
+    zjh_weekly_path = "zjh_weekly.xls"
     # update zjh xls
-    download_zjh_xls(zjh_path)
+    download_zjh_xls(zjh_weekly_path)
 
     t0 = time.time()
-    result_xls = 'result.xls'
+    result_xls = 'result_v2.xls'
+
+    # todo: to remove after modify load_db:
+    os.remove(result_xls)
+
     easy_db, normal_db = load_db(result_xls)
-    wd_data = load_wd_data('wd.xlsx')
-    zjh_easy_rows, zjh_normal_rows = extract_rows_from_zjh_easy('zjh.xls')
-    new_easy_db = fulfill_db_with_zjh_easy(easy_db, zjh_easy_rows, wd_data)
-    new_normal_db = fulfill_db_with_zjh_easy(normal_db, zjh_normal_rows, wd_data)
-    store_db(new_easy_db, new_normal_db, result_xls)
+    # wd_dict: quancheng -> row
+    wd_rows, wd_dict = load_wd_data('wd.xlsx')
+
+    zjh_full_rows = extract_rows_from_zjh_full("zjh_full.xlsx")
+    zjh_weekly_easy_rows, zjh_weekly_normal_rows = extract_rows_from_zjh_weekly(zjh_weekly_path)
+    zjh_weekly_rows = zjh_weekly_easy_rows + zjh_weekly_normal_rows
+
+    new_db = fulfill_db_with_zjh_full(easy_db, zjh_full_rows, wd_dict, zjh_weekly_rows)
+
+    store_db_v2(new_db, result_xls)
+
+    # store_db(new_db, result_xls)
     t1 = time.time()
     print("all process elapsed: {}".format(t1 - t0))
 
