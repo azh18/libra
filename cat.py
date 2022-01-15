@@ -87,9 +87,9 @@ def check_wd_data(first_row):
             raise Exception("col {} not in the right column in wd.xlsx".format(col_name))
 
 
-# 拉取万德数据
+# 拉取万德数据 (16 cols)
 # ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
-# 'Wind一级分类', 'Wind二级分类', '基金代码')
+# 'Wind一级分类', 'Wind二级分类', '基金代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '获批注册日')
 def load_wd_data(wd_file):
     wd_rows = []
     wd_dict = {}
@@ -100,7 +100,7 @@ def load_wd_data(wd_file):
         row = sheet.row_values(i)
         if not isinstance(row[0], str) or len(row[0]) < 7 or not row[0][:6].isdigit():
             continue
-        wd_row = ['' for _ in range(11)]
+        wd_row = ['' for _ in range(16)]
         wd_row[0] = row[2]
         wd_row[1] = row[3]
         wd_row[2] = row[14].strip().replace('（', '(').replace('）', ')')
@@ -114,6 +114,9 @@ def load_wd_data(wd_file):
         wd_row[7] = row[10]
         wd_row[8:10] = row[12:14]
         wd_row[10] = row[0]
+        wd_row[11:15] = row[18:22]
+        wd_row[15] = row[4]
+
         for j in range(len(wd_row)):
             if isinstance(wd_row[j], str):
                 wd_row[j] = wd_row[j].strip()
@@ -182,19 +185,44 @@ def load_db(result_xls_path):
 
 easy_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
-              '是否为变更注册', '若为变更注册，原申请事项名称/代码']
+              '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码']
+desired_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '基金代码', '发行公告日期', '认购起始日', ' 认购截止日',
+                 '基金成立日', '发行总份额', '基金规模(合计)', '基金规模（净值x总份额）', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式',
+                 '是否为定期开放', '是否为港股通/香港主题',
+                 '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金净值日期', '单位净值', '基金份额(合计)']
+
+
+# 调整列顺序
+def gen_db_with_desired_title(origin_db):
+    idx_map = [None for _ in range(len(easy_title))]
+    for i, key in enumerate(easy_title):
+        for j, target in enumerate(desired_title):
+            if target == key:
+                idx_map[i] = j
+                break
+
+    desired_db = []
+    for origin_row in origin_db:
+        new_row = ["" for i in range(len(easy_title))]
+        for i, val in enumerate(origin_row):
+            new_row[idx_map[i]] = val
+        desired_db.append(new_row)
+    return desired_db
 
 
 # 仅非变更程序
 def store_db_v2(new_db, file):
+    desired_db = gen_db_with_desired_title(new_db)
+
     f = xlwt.Workbook()
     easy_sheet = f.add_sheet('非变更程序', cell_overwrite_ok=True)
-    print('非变更程序：%d' % len(new_db))
-    temp_rows = [easy_title] + new_db
+    print('非变更程序：%d' % len(desired_db))
+    temp_rows = [desired_title] + desired_db
     for i, row in enumerate(temp_rows):
         print('add %d' % i)
         for j, item in enumerate(row):
             easy_sheet.write(i, j, item)
+
     f.save(file)
 
 
@@ -319,6 +347,7 @@ def autofill_easy_row(easy_row):
     return easy_row
 
 
+# todo: 万德表格后来添加了四列，如果用这个方法注意加上
 # 使用万德数据填充： wd_data: ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
 # 'Wind一级分类', 'Wind二级分类')
 def fulfill_row_with_wd_rows(easy_row, wd_rows):
@@ -348,8 +377,10 @@ def fulfill_row_with_wd_rows(easy_row, wd_rows):
     return easy_row
 
 
-# 使用万德数据填充： wd_data: ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
-# 'Wind一级分类', 'Wind二级分类')
+# 使用万德数据填充
+# 万德数据 (16 cols)
+# ('管理人', '托管人', '基金全称', 发行公告日期', '认购起始日',' 认购截止日', '基金成立日', '发行总份额',
+# 'Wind一级分类', 'Wind二级分类', '基金代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '获批注册日')
 # return (found, fulfilled_row)
 def fulfill_row_with_wd_dict(easy_row, wd_dict):
     quancheng = easy_row[2]
@@ -359,6 +390,10 @@ def fulfill_row_with_wd_dict(easy_row, wd_dict):
     wd_row = wd_dict[quancheng]
     print('%s match %s' % (wd_row, easy_row))
     easy_row[1] = wd_row[1]
+    # 如果决定日不存在，则使用万德替换
+    if not easy_row[5]:
+        easy_row[5] = wd_row[15]
+
     if not easy_row[6]:
         easy_row[6] = wd_row[3]
     if not easy_row[7]:
@@ -373,6 +408,13 @@ def fulfill_row_with_wd_dict(easy_row, wd_dict):
         easy_row[11] = wd_row[8]
     if not easy_row[12]:
         easy_row[12] = wd_row[9]
+    easy_row[20:24] = wd_row[11:15]
+    try:
+        easy_row[24] = float(wd_row[13]) * float(wd_row[14])
+    except ValueError:
+        easy_row[24] = ''
+    easy_row[25] = wd_row[10]
+
     return True, easy_row
 
 
@@ -392,7 +434,7 @@ def fulfill_row_with_zjh_weekly_rows(easy_row, zjh_weekly_rows):
 
 # db_row: ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
 #               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
-#               '是否为变更注册', '若为变更注册，原申请事项名称/代码']
+#               '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码']
 # zjh_full_row: # 0 接受材料日期（申请日）	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注
 def complete_row_with_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, zjh_weekly_rows):
     st = time.time()
@@ -471,7 +513,7 @@ def fulfill_db_with_zjh_full(db, zjh_full_rows, wd_dict, zjh_weekly_rows):
             print('%d/%d' % (n_fin, n_tasks))
             if zjh_full_row[2] in db_dict:
                 continue
-            db_row = ['' for i in range(20)]
+            db_row = ['' for i in range(26)]
             v = pool.apply_async(complete_row_with_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
                                                                        zjh_weekly_rows))
             v_list.append(v)
@@ -580,7 +622,7 @@ def check_zjh_weekly_add_col_names(second_row, third_row):
     for i in col_map.values():
         correct_col_exist[i] = True
     exist_tolerance = [False for _ in range(len(correct_col_name_list))]
-    exist_tolerance[1] = True # 可以没有基金托管人
+    exist_tolerance[1] = True  # 可以没有基金托管人
     for i, ex in enumerate(correct_col_exist):
         if not ex:
             if exist_tolerance[i]:
@@ -752,6 +794,10 @@ def extract_row_from_zjh_full(zjh_full_row, col_map):
     row[3] = format_date_value(row[3])
     row[4] = format_date_value(row[4])
     return row
+
+
+def postprocess_db_row(db_row):
+    pass
 
 
 import shutil
