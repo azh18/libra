@@ -206,6 +206,8 @@ def gen_db_with_desired_title(origin_db):
         new_row = ["" for i in range(len(easy_title))]
         for i, val in enumerate(origin_row):
             new_row[idx_map[i]] = val
+        # print("origin_row=", origin_row)
+        # print("new_row=", new_row)
         desired_db.append(new_row)
     return desired_db
 
@@ -219,8 +221,9 @@ def store_db_v2(new_db, file):
     print('非变更程序：%d' % len(desired_db))
     temp_rows = [desired_title] + desired_db
     for i, row in enumerate(temp_rows):
-        print('add %d' % i)
+        print('add %d, n_col=%d' % (i, len(row)))
         for j, item in enumerate(row):
+            # print('write (%d, %d)' % (i, j))
             easy_sheet.write(i, j, item)
 
     f.save(file)
@@ -344,6 +347,8 @@ def autofill_easy_row(easy_row):
         easy_row[16] = '是'
     if '港' in full_name and '港口' not in full_name:
         easy_row[17] = '是'
+    if easy_row[18] != '是':
+        easy_row[18] = '否'
     return easy_row
 
 
@@ -436,7 +441,7 @@ def fulfill_row_with_zjh_weekly_rows(easy_row, zjh_weekly_rows):
 #               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
 #               '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码']
 # zjh_full_row: # 0 接受材料日期（申请日）	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注
-def complete_row_with_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, zjh_weekly_rows):
+def complete_db_row_based_on_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, zjh_weekly_rows):
     st = time.time()
     db_row[0] = zjh_full_row[1]
     db_row[2] = zjh_full_row[2]
@@ -453,19 +458,23 @@ def complete_row_with_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, zjh_weekl
     db_row = format_easy_row(db_row)
     et = time.time()
     print("process {} elapsed: {}".format(idx, et - st))
+    # print("result: ", db_row)
     return db_row
 
 
-def complete_row_with_zjh_weekly_row(idx, db_row, wd_rows, zjh_row):
-    t0 = time.time()
-    db_row[0:6] = zjh_row[0:6]
-    db_row[18:20] = zjh_row[6:8]
+def complete_db_row_based_on_zjh_weekly_row(idx, db_row, wd_dict, zjh_weekly_row):
+    st = time.time()
+    db_row[0:6] = zjh_weekly_row[0:6]
+    db_row[18:20] = zjh_weekly_row[6:8]
 
-    db_row = fulfill_row_with_wd_rows(db_row, wd_rows)
-    db_row = autofill_easy_row(db_row)
+    found, fulfilled_db_row = fulfill_row_with_wd_dict(db_row, wd_dict)
+    if not found:
+        fulfilled_db_row = db_row
+    db_row = autofill_easy_row(fulfilled_db_row)
     db_row = format_easy_row(db_row)
-    t1 = time.time()
-    print("process {} elapsed: {}".format(idx, t1 - t0))
+    et = time.time()
+    print("process {} elapsed: {}".format(idx, et - st))
+    # print("result: ", db_row)
     return db_row
 
 
@@ -485,24 +494,25 @@ def fulfill_db_with_zjh_full(db, zjh_full_rows, wd_dict, zjh_weekly_rows):
     n_tasks = len(db) + len(zjh_full_rows)
     n_fin = 0
 
+    new_db_row_list = []
+
     # update db: if not in zjh_full_dict, remove them; else update them use data from zjh_weekly and wd_data
-    new_db = []
-    pool = Pool(processes=CPU_NUM)
-    with Manager() as ma:
-        v_list = []
-        for db_row in db:
-            n_fin += 1
-            print('%d/%d' % (n_fin, n_tasks))
-            if db_row[2] not in zjh_full_dict:
-                continue
-            zjh_full_row = zjh_full_dict[db_row[2]]
-            v = pool.apply_async(complete_row_with_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
-                                                                       zjh_weekly_rows))
-            v_list.append(v)
-        pool.close()
-        pool.join()
-        new_db += [v.get() for v in v_list]
-    print("len of db: %d" % len(new_db))
+    # pool = Pool(processes=CPU_NUM)
+    # with Manager() as ma:
+    #     v_list = []
+    #     for db_row in db:
+    #         n_fin += 1
+    #         print('%d/%d' % (n_fin, n_tasks))
+    #         if db_row[2] not in zjh_full_dict:
+    #             continue
+    #         zjh_full_row = zjh_full_dict[db_row[2]]
+    #         v = pool.apply_async(complete_db_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
+    #                                                     zjh_weekly_rows))
+    #         v_list.append(v)
+    #     pool.close()
+    #     pool.join()
+    #     new_db += [v.get() for v in v_list]
+    # print("len of db: %d" % len(new_db))
 
     # for those in zjh_full_rows but not in db: fill fields using zjh_weekly and wd_data, then add them to the db
     pool = Pool(processes=CPU_NUM)
@@ -514,17 +524,32 @@ def fulfill_db_with_zjh_full(db, zjh_full_rows, wd_dict, zjh_weekly_rows):
             if zjh_full_row[2] in db_dict:
                 continue
             db_row = ['' for i in range(26)]
-            v = pool.apply_async(complete_row_with_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
-                                                                       zjh_weekly_rows))
+            v = pool.apply_async(complete_db_row_based_on_zjh_full_row, args=(n_fin, db_row, wd_dict, zjh_full_row,
+                                                                              zjh_weekly_rows))
             v_list.append(v)
         pool.close()
         pool.join()
-        new_db += [v.get() for v in v_list]
-    print("len of db: %d" % len(new_db))
+        new_db_row_list += [v.get() for v in v_list]
+    print("len of db: %d" % len(new_db_row_list))
 
-    new_db = sorted(new_db, key=lambda x: str(x[3]) + str(x[4]), reverse=True)
+    # 处理变更注册：加入db_row，并按变更后的全名匹配wd
+    pool = Pool(processes=CPU_NUM)
+    with Manager() as ma:
+        v_list = []
+        for zjh_weekly_row in zjh_weekly_rows:
+            n_fin += 1
+            if zjh_weekly_row[6] != '是':
+                continue
+            db_row = ['' for i in range(26)]
+            v = pool.apply_async(complete_db_row_based_on_zjh_weekly_row, args=(n_fin, db_row, wd_dict, zjh_weekly_row))
+            v_list.append(v)
+        pool.close()
+        pool.join()
+        new_db_row_list += [v.get() for v in v_list]
+    print("len of db: %d" % len(new_db_row_list))
 
-    return new_db
+    new_db_row_list = sorted(new_db_row_list, key=lambda x: str(x[3]) + str(x[4]), reverse=True)
+    return new_db_row_list
 
 
 # 简易程序: zjh_row -> (管理人，托管人，申请事项，申请日，受理日，决定日，是否为变更注册，变更注册代码)
@@ -814,7 +839,7 @@ if __name__ == "__main__":
     # todo: to remove after modify load_db:
     shutil.rmtree(result_xls, ignore_errors=True)
 
-    easy_db, normal_db = load_db(result_xls)
+    # easy_db, normal_db = load_db(result_xls)
     # wd_dict: quancheng -> row
     wd_rows, wd_dict = load_wd_data('wd.xlsx')
 
@@ -822,7 +847,7 @@ if __name__ == "__main__":
     zjh_weekly_easy_rows, zjh_weekly_normal_rows = extract_rows_from_zjh_weekly(zjh_weekly_path)
     zjh_weekly_rows = zjh_weekly_easy_rows + zjh_weekly_normal_rows
 
-    new_db = fulfill_db_with_zjh_full(easy_db, zjh_full_rows, wd_dict, zjh_weekly_rows)
+    new_db = fulfill_db_with_zjh_full([], zjh_full_rows, wd_dict, zjh_weekly_rows)
 
     store_db_v2(new_db, result_xls)
 
