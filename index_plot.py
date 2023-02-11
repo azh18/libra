@@ -112,7 +112,7 @@ def write_retracement_series(filename, series_dict):
 
 
 if __name__ == "__main__":
-    code_list = ["931168.CSI", "931463.CSI", "931476.CSI", "931465.CSI", "000970.CSI", "931148.CSI", "931466.CSI"]
+    code_list = ["892400.MI", "931463.CSI", "931476.CSI", "931465.CSI", "000970.CSI", "931148.CSI", "931466.CSI"]
     start_date = "2017-06-30"
     end_date = "2021-08-06"
     normalized_price_plot_filename = "normalized_index_price.png"
