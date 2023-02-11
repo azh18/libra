@@ -715,7 +715,25 @@ def check_zjh_weekly_change_col_names(second_row, third_row):
 # zjh row -> data row
 def extract_rows_from_zjh_weekly(zjh_filename):
     easy_rows = []
-    easy_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[0]
+    sheets = xlrd.open_workbook(zjh_filename).sheets()
+    easy_add_idx, easy_change_idx, normal_add_idx, normal_change_idx = -1, -1, -1, -1
+    for i in range(len(sheets)):
+        sheet_name = sheets[i].name
+        if "简易" in sheet_name and "变更" in sheet_name:
+            easy_change_idx = i
+            continue
+        if "普通" in sheet_name and "变更" in sheet_name:
+            normal_change_idx = i
+            continue
+        if "简易程序" in sheet_name:
+            easy_add_idx = i
+            continue
+        if "普通程序" in sheet_name:
+            normal_add_idx = i
+            continue
+    print("sheet 顺序为：[简易程序,变更注册（简易）,普通程序,变更注册（普通）] = [%d,%d,%d,%d]" % (easy_add_idx, easy_change_idx, normal_add_idx, normal_change_idx))
+
+    easy_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[easy_add_idx]
     easy_add_col_map = check_zjh_weekly_add_col_names(easy_add_sheet.row_values(1), easy_add_sheet.row_values(2))
     print("easy_add_col_map={}".format(easy_add_col_map))
     for i in range(easy_add_sheet.nrows):
@@ -729,7 +747,7 @@ def extract_rows_from_zjh_weekly(zjh_filename):
                 easy_row[j] = easy_row[j].strip()
         easy_rows.append(easy_row)
 
-    easy_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[2]
+    easy_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[easy_change_idx]
     easy_change_col_map = check_zjh_weekly_change_col_names(easy_change_sheet.row_values(1),
                                                             easy_change_sheet.row_values(2))
     print("easy_change_col_map={}".format(easy_change_col_map))
@@ -746,7 +764,7 @@ def extract_rows_from_zjh_weekly(zjh_filename):
 
     # normal
     normal_rows = []
-    normal_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[1]
+    normal_add_sheet = xlrd.open_workbook(zjh_filename).sheets()[normal_add_idx]
     normal_add_col_map = check_zjh_weekly_add_col_names(normal_add_sheet.row_values(1), normal_add_sheet.row_values(2))
     print("normal_add_col_map={}".format(easy_add_col_map))
     for i in range(normal_add_sheet.nrows):
@@ -760,7 +778,7 @@ def extract_rows_from_zjh_weekly(zjh_filename):
                 row[j] = row[j].strip()
         normal_rows.append(row)
 
-    normal_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[3]
+    normal_change_sheet = xlrd.open_workbook(zjh_filename).sheets()[normal_change_idx]
     normal_change_col_map = check_zjh_weekly_change_col_names(normal_change_sheet.row_values(1),
                                                               normal_change_sheet.row_values(2))
     print("normal_change_col_map={}".format(normal_change_col_map))
