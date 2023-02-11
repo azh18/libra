@@ -77,7 +77,8 @@ def match_string(a, b):
 
 def check_wd_data(first_row):
     wd_col_name = ["证券代码", "证券简称", "基金管理人", "基金托管人", "基金获批注册日期", "发行公告日", "发行日期",
-                   "个人投资者认购终止日", "机构投资者设立认购终止日", "基金成立日", "发行总份额\n[单位] 亿份", "上市日期", "投资类型(一级分类)",
+                   "个人投资者认购终止日", "机构投资者设立认购终止日", "基金成立日", "发行总份额\n[单位] 亿份",
+                   "上市日期", "投资类型(一级分类)",
                    "投资类型(二级分类)", "基金全称"]
     for i, col_name in enumerate(first_row):
         if i >= len(wd_col_name):
@@ -185,11 +186,17 @@ def load_db(result_xls_path):
     return easy_db, normal_db
 
 
-easy_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
-              '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
-              '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码']
-desired_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '基金代码', '发行公告日期', '认购起始日', ' 认购截止日',
-                 '基金成立日', '发行总份额', '基金规模(合计)', '基金规模（净值x总份额）', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式',
+easy_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期',
+              '认购起始日', ' 认购截止日',
+              '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式',
+              '是否为定期开放', '是否为港股通/香港主题',
+              '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值',
+              '基金份额(合计)', '基金规模（净值x总份额）', '基金代码',
+              '补正日']
+desired_title = ['基金管理人', '基金托管人', '申请事项', '申请日', '补正日', '受理日（排序项）', '决定日', '基金代码',
+                 '发行公告日期', '认购起始日', ' 认购截止日',
+                 '基金成立日', '发行总份额', '基金规模(合计)', '基金规模（净值x总份额）', 'Wind一级分类', 'Wind二级分类',
+                 '一级分类', '二级分类', '是否为发起式',
                  '是否为定期开放', '是否为港股通/香港主题',
                  '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金净值日期', '单位净值', '基金份额(合计)']
 
@@ -444,8 +451,9 @@ def fulfill_row_with_zjh_weekly_rows(easy_row, sorted_zjh_weekly_rows, sorted_zj
 
 # db_row: ['基金管理人', '基金托管人', '申请事项', '申请日', '受理日（排序项）', '决定日', '发行公告日期', '认购起始日', ' 认购截止日',
 #               '基金成立日', '发行总份额', 'Wind一级分类', 'Wind二级分类', '一级分类', '二级分类', '是否为发起式', '是否为定期开放', '是否为港股通/香港主题',
-#               '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码']
-# zjh_full_row: # 0 接受材料日期（申请日）	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注 8事项
+#               '是否为变更注册', '若为变更注册，原申请事项名称/代码', '基金规模(合计)', '基金净值日期', '单位净值', '基金份额(合计)', '基金规模（净值x总份额）', '基金代码',
+#               '补正日']
+# zjh_full_row: # 0 接受材料日期（申请日）	1 公司名称（管理人）	2 基金名称	3受理日期	4补正日期	5一级分类	6二级分类	7备注 8事项.
 def complete_db_row_based_on_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, sorted_zjh_weekly_rows,
                                           sorted_zjh_weekly_rows_apply_date_list):
     st = time.time()
@@ -454,6 +462,7 @@ def complete_db_row_based_on_zjh_full_row(idx, db_row, wd_dict, zjh_full_row, so
     db_row[3] = zjh_full_row[0]
     db_row[4] = zjh_full_row[3]
     db_row[13:15] = zjh_full_row[5:7]
+    db_row[26] = zjh_full_row[4]
     if '变更' in zjh_full_row[8]:
         db_row[18] = '是'
     # todo: 备注还没有加上
@@ -512,7 +521,7 @@ def fulfill_db_with_zjh_full(db, zjh_full_rows, wd_dict, sorted_zjh_weekly_rows)
         print("%d/%d" % (n_fin, n_tasks))
         if zjh_full_row[2] in db_dict:
             continue
-        db_row = ['' for i in range(26)]
+        db_row = ['' for i in range(27)]
         v = complete_db_row_based_on_zjh_full_row(n_fin, db_row, wd_dict, zjh_full_row, sorted_zjh_weekly_rows,
                                                   sorted_zjh_weekly_rows_apply_date_list)
         new_db_row_list.append(v)
@@ -770,7 +779,8 @@ def extract_rows_from_zjh_weekly(zjh_filename):
 
 
 def check_zjh_full_col_name(first_row):
-    correct_col_name_list = ["接受材料日期", "公司名称", "基金名称", "受理日期", "补正日期", "一级分类", "二级分类", "备注", "事项"]
+    correct_col_name_list = ["接受材料日期", "公司名称", "基金名称", "受理日期", "补正日期", "一级分类", "二级分类",
+                             "备注", "事项"]
     first_row = list(map(lambda x: x.strip(), first_row))
     exist_mark = [False for i in range(len(correct_col_name_list))]
     col_map = {}
